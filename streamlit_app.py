@@ -119,7 +119,7 @@ class AntarmukaTampilan:
             df_dict = dict(
                 tuple(bundling_with_price.groupby('Kode Rules')))
 
-            # pb.menyimpanDataPaketBundling(bundling_download)
+            pb.menyimpanDataPaketBundling(bundling_download)
             st.markdown("<h4>Rekomendasi Paket Bundling</h4>", unsafe_allow_html=True)
             st.markdown("<p>Harga beli didapatkan dari harga jual yang terdapat pada kolom Lineitem price dibagi 4. harga beli merupakan harga modal perusahaan terhadap produk</p>", unsafe_allow_html=True)
             st.markdown("<p>Rekomendasi harga paket bundling didapatkan dari total harga beli produk x 3</p>", unsafe_allow_html=True)
