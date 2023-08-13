@@ -3,4 +3,3 @@ pandas
 mlxtend
 streamlit_option_menu
 Xlsxwriter
-io
