@@ -108,9 +108,14 @@ class AssociationRules:
         list_produk = list_produk.drop_duplicates(subset=['Lineitem name'])
         # Harga Beli
         list_produk['Harga Beli'] = (list_produk['Lineitem price'] / 4).round(2)
+        
+        # Harga Minimum Jual
+        list_produk['Harga Minimum Jual'] = (list_produk['Harga Beli'] * 3).round(2)
+        
         # Menghitung kemunculan setiap nilai pada Lineitem name dari tabel produk pada transaksi
-        list_produk['Frekuensi'] = list_produk['Lineitem name'].map(dataCleaning['Lineitem name'].value_counts()).fillna(0).astype(int)
-        # Mengurutkan Frekuensi dari terbesar ke terkecil
+        list_produk['Support'] = list_produk['Lineitem name'].map(dataCleaning['Lineitem name'].value_counts()).fillna(0).astype(int)
+        
+        # Mengurutkan Support dari terbesar ke terkecil
         list_produk = list_produk.sort_values(by='Lineitem name', ascending=True)
         list_produk.reset_index(drop=True, inplace=True)
 
@@ -118,7 +123,7 @@ class AssociationRules:
         return list_produk
     
     def minSupport(list_produk, transactions_list):
-        get_frekuensi = list_produk['Frekuensi'].mean()
+        get_frekuensi = list_produk['Support'].mean()
         get_frekuensi = round(get_frekuensi)
         get_len_transaction = len(transactions_list)
         # Menghitung persentase
@@ -131,29 +136,31 @@ class AssociationRules:
         if 'rules' not in session_state:
             session_state.rules = None
 
+        if 'frequent_itemsets' not in session_state:
+            session_state.frequent_itemsets = pd.DataFrame()
+
+        if 'df_association' not in session_state:
+            session_state.df_association = pd.DataFrame()
+
         if 'df_association_unique' not in session_state:
             session_state.df_association_unique = pd.DataFrame()
         
         # Membuat frequent itemsets
-        st.markdown("<h3>Frequent Itemsets</h3>", unsafe_allow_html=True)
         frequent_itemsets = fpgrowth(
             trans_encoder_matrix, min_support=min_support, use_colnames=True)
-        st.write(frequent_itemsets)
-
-        st.markdown("<h3>Rules</h3>", unsafe_allow_html=True)
+        session_state.frequent_itemsets = frequent_itemsets
+        
         rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
         rules['Count items'] = rules['antecedents'].apply(lambda x: len(x)) + rules['consequents'].apply(lambda x: len(x))
         rules['id_rule'] = rules.reset_index().index + 1
-        
-        st.dataframe(rules)
         session_state.rules = rules
 
         # Membuat dataframe dari data association rule
         df_association = rules.copy()
         # Combine antecedents and consequents into a new column 'produk rules' using list comprehension
         df_association['Produk Rules'] = [sorted(list(row['antecedents']) + list(row['consequents'])) for _, row in df_association.iterrows()]
-
         df_association.drop(columns=['id_rule','antecedents', 'consequents', 'antecedent support', 'consequent support', 'support', 'confidence', 'lift', 'leverage','conviction', 'zhangs_metric', 'Count items'], inplace=True)
+        session_state.df_association = df_association
 
         # Mengkonversi daftar menjadi string
         df_association_unique = df_association.copy()
@@ -166,10 +173,6 @@ class AssociationRules:
         df_association_unique['Produk Rules'] = df_association_unique['Produk Rules'].apply(eval)
         df_association_unique = df_association_unique.reset_index(drop=True)
         session_state.df_association_unique = df_association_unique
-        
-        if st.button("Buat Paket Bundling", use_container_width=True, type="primary",):
-            session_state.selected_page = 'Buat Paket Bundling'
-            st.experimental_rerun()
 
         return rules, frequent_itemsets
     
@@ -229,13 +232,15 @@ class AssociationRules:
         st.dataframe(trans_encoder_matrix)
         st.divider()
         
+        # MENAMPILKAN MODLING
         # MENAMPILKAN MODELING MIN SUPPORT
         st.markdown("<h2>Modeling</h2>",unsafe_allow_html=True)
         st.markdown("<h3>Minimum Support</h3>", unsafe_allow_html=True)
-        st.markdown("<p>min support didapatkan dari rata-rata Frekuensi produk sehingga perlu dibuat list produk dengan Frekuensi. Lineitem price akan digunakan untuk membuat rekomendasi paket bundling</p>", unsafe_allow_html=True)
+        st.markdown("<p>min support didapatkan dari rata-rata Support produk sehingga perlu dibuat list produk dengan Support. Lineitem price akan digunakan untuk membuat rekomendasi paket bundling</p>", unsafe_allow_html=True)
         list_produk = AssociationRules.getListProduk()
-        st.dataframe(list_produk)
-        get_frekuensi = list_produk['Frekuensi'].mean()
+        list_produk_show = list_produk[['Lineitem name','Support']]
+        st.dataframe(list_produk_show, use_container_width=True)
+        get_frekuensi = list_produk['Support'].mean()
         get_frekuensi = round(get_frekuensi)
         get_len_transaction = len(transactions_list)
         st.write("Diketahui mean frekuensi: ", get_frekuensi)
@@ -257,6 +262,23 @@ class AssociationRules:
             "<p >nilai minimum confidence ditetapkan 70 persen berdasarkan referensi penelitian</p>", unsafe_allow_html=True)
         min_confidence = 0.7
         st.write(min_confidence)
+
+        #  MENAMPILKAN MODELING Frequent itemsets
+        st.markdown("<h3>Frequent Itemsets</h3>", unsafe_allow_html=True)
+        st.dataframe(session_state.df_association_unique, use_container_width=True)
+
+        #  MENAMPILKAN MODELING Rules
+        st.markdown("<h3>Rules</h3>", unsafe_allow_html=True)
+        st.write("terdapat = {} rules".format(session_state.rules.shape[0]))
+        st.dataframe(session_state.rules, use_container_width=True)
+
+        #  MENAMPILKAN EVALUASI RULES
+        st.markdown("<h2>Evaluasi</h2>",unsafe_allow_html=True)
+        st.markdown("<h3>Menggabungkan antecedents dan consequents</h3>",unsafe_allow_html=True)
+        st.dataframe(session_state.df_association, use_container_width=True)
+        st.markdown("<h3>Rekomendasi produk bundling</h3>",unsafe_allow_html=True)
+        st.markdown("<p>Rekomendasi produk bundling adalah produk yang didapatkan dari rules yang telah dilakukan penghapusan dulikasi rules, nantinya rekomendasi produk ini akan digabungkan dengan proses pembuatan produk bundling yang dilakukan Greenspaces.id dan akan menghasilkan rekomendasi paket bundling dan rekomendasi harga</p>",unsafe_allow_html=True)
+        st.dataframe(session_state.df_association_unique, use_container_width=True)
 
 class PaketBundling:
     def pilihKategori(list_produk):
@@ -291,15 +313,15 @@ class PaketBundling:
         kategori_banyak_terjual = st.selectbox('Paling banyak terjual', kategori_list, key="select_banyak_terjual")
         
         df_kategori_tertinggi = list_produk[list_produk['Lineitem name'].str.contains(kategori_banyak_terjual)]
-        df_kategori_tertinggi = df_kategori_tertinggi.nlargest(1, 'Frekuensi')
-        # df_kategori_tertinggi.drop(columns=["Frekuensi","Category"], inplace=True)
+        df_kategori_tertinggi = df_kategori_tertinggi.nlargest(1, 'Support')
+        # df_kategori_tertinggi.drop(columns=["Support","Category"], inplace=True)
 
         # Menampilkan select option dengan opsi kategori
         kategori_sedikit_terjual = st.selectbox('Paling sedikit terjual', kategori_list, key="select_sedikit_terjual")
 
         df_kategori_terendah = list_produk[list_produk['Lineitem name'].str.contains(kategori_sedikit_terjual)]
-        df_kategori_terendah = df_kategori_terendah.nsmallest(1, 'Frekuensi')
-        # df_kategori_terendah.drop(columns=["Frekuensi",'Category'], inplace=True)
+        df_kategori_terendah = df_kategori_terendah.nsmallest(1, 'Support')
+        # df_kategori_terendah.drop(columns=["Support",'Category'], inplace=True)
         
         df_kategori = pd.concat([df_kategori_tertinggi, df_kategori_terendah], ignore_index=True)
         session_state.df_pilih_kategori = df_kategori
@@ -348,6 +370,7 @@ class PaketBundling:
                 if st.button(f"Delete {tanaman['Lineitem name']}", key=f"delete_{idx}"):
                     session_state.data_tanaman_baru.pop(idx)
                     st.experimental_rerun()
+
     def buatPaketBundling():
         if st.button("Buat Paket Bundling", type='primary', use_container_width=True, key="buat_paket_bundling"):
             if session_state.df_pilih_kategori is not None:
@@ -356,14 +379,17 @@ class PaketBundling:
                         # Inisialisasi session_state jika belum ada
                         df_data_tanaman_baru = pd.DataFrame(session_state.data_tanaman_baru)
                         df_data_tanaman_baru['Harga Beli'] = (df_data_tanaman_baru['Lineitem price'] / 4).round(2)
-                        df_data_tanaman_baru['Frekuensi'] = 0
+                        df_data_tanaman_baru['Harga Minimum Jual'] = (df_data_tanaman_baru['Harga Beli'] * 3).round(2)
+                        df_data_tanaman_baru['Support'] = 0
                         
                         df_bundling_now = pd.concat([session_state.df_pilih_kategori, df_data_tanaman_baru], ignore_index=True)
                         if not df_bundling_now.duplicated().any():
                             if 'list_produk_new' not in session_state:
                                 session_state.list_produk_new = pd.DataFrame
+
                             if 'df_bundling_now' not in session_state:
                                 session_state.df_bundling_now = pd.DataFrame
+
                             list_produk_new  = pd.concat([session_state.list_produk, df_data_tanaman_baru], ignore_index=True)
                             session_state.list_produk_new = list_produk_new
                             session_state.df_bundling_now = df_bundling_now
@@ -398,22 +424,21 @@ class PaketBundling:
         # Mengakses DataFrame untuk masing-masing Kode Rules menggunakan perulangan
         for kode_rules, rekomendasi_bundling in df_dict.items():
             st.write(f"Rekomendasi ke {kode_rules}")
-            
             rekomendasi_bundling_show = rekomendasi_bundling.reset_index(drop=True)
-            rekomendasi_bundling_show = rekomendasi_bundling.drop(columns=['Frekuensi','Kode Rules'])
+            rekomendasi_bundling_show = rekomendasi_bundling.drop(columns=['Kode Rules'])
             rekomendasi_bundling_show.index = range(1, len(rekomendasi_bundling_show) + 1)
 
             # Tambahkan kolom 'no' dengan nilai dari index
-            rekomendasi_bundling_show['no'] = rekomendasi_bundling_show.index
-            rekomendasi_bundling_show = rekomendasi_bundling_show.set_index('no')
-
-            st.dataframe(rekomendasi_bundling_show, use_container_width=True)
+            rekomendasi_bundling_show['No'] = rekomendasi_bundling_show.index
+            rekomendasi_bundling_show = rekomendasi_bundling_show.set_index('No')
+            rekomendasi_bundling_show_table = rekomendasi_bundling_show[['Lineitem name', 'Lineitem price', 'Harga Beli', 'Harga Minimum Jual']]
+            st.dataframe(rekomendasi_bundling_show_table, use_container_width=True)
             # Menghitung nilai total dari kolom "Nilai"
-            jumlah_harga_beli = rekomendasi_bundling["Harga Beli"].sum()
-            rekomendasi_harga_bundling =  jumlah_harga_beli * 3
-            total_keuntungan = rekomendasi_harga_bundling - jumlah_harga_beli
-            st.success(f"Rekomendasi harga bundling '{rekomendasi_harga_bundling}'")
-            st.success(f"Keuntungan '{total_keuntungan}'")
+            # jumlah_harga_beli = rekomendasi_bundling["Harga Beli"].sum()
+            # rekomendasi_harga_bundling =  jumlah_harga_beli * 3
+            # total_keuntungan = rekomendasi_harga_bundling - jumlah_harga_beli
+            st.success(f"Rekomendasi harga bundling '{rekomendasi_bundling_show['Rekomendasi Harga Bundling'].iloc[0]}'")
+            st.success(f"Keuntungan '{rekomendasi_bundling_show['Keuntungan'].iloc[0]}'")
             
             if rekomendasi_bundling_show.shape[0] > 10:
                 st.error("Jumlah produk melebih maksimum, paket bundling tidak boleh lebih dari 10")

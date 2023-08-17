@@ -5,7 +5,6 @@ from streamlit_option_menu import option_menu
 from module import AssociationRules as ar, PaketBundling as pb
 import pandas as pd
 
-
 class AntarmukaTampilan:
     # Page 1 content
     def halamanMasukkanTranasksi():
@@ -17,7 +16,7 @@ class AntarmukaTampilan:
         upload = ar.memasukkanTransaksi()
         ar.validasiMasukkanTransaksi(upload)
 
-        if st.button('Lihat proses data mining', type="primary", use_container_width=True):
+        if st.button('Proses association rule', type="primary", use_container_width=True):
             if 'upload_transactions' in session_state:
                 if not ar.getUploadTransaksi().empty:
                     session_state.selected_page = "Proses Association Rules"
@@ -32,6 +31,8 @@ class AntarmukaTampilan:
         st.markdown("<p>Pada halaman ini akan ditampilkan proses association rules yang terdiri dari pemilihan attribute, cleaning data, transform data dan pengimplementasian association rule untuk mendapatkan produk rekomendasi</p>", unsafe_allow_html=True)
         st.divider()
         if not ar.getUploadTransaksi().empty:
+            if 'proses_association_rule_done' not in session_state:
+                session_state.proses_association_rule_done = False
             df_transactions= ar.getUploadTransaksi()
             selectAttribute = ar.selectAttribute(df_transactions)
             transformText = ar.transformText(selectAttribute)
@@ -39,8 +40,12 @@ class AntarmukaTampilan:
             transactions_list, trans_encoder_matrix = ar.transformData(dataCleaning)
             list_produk = ar.createListProduk(dataCleaning)
             min_support = ar.minSupport(list_produk, transactions_list) 
-            ar.tampilProsesAssociationRules()
             ar.rules(trans_encoder_matrix, min_support)
+            ar.tampilProsesAssociationRules()
+            session_state.proses_association_rule_done = True
+            if st.button("Buat Paket Bundling", use_container_width=True, type="primary",):
+                session_state.selected_page = 'Buat Paket Bundling'
+                st.experimental_rerun()
         else:
             st.error("Masukkan file transaksi terlebih dahulu")
             if st.button("Upload Data",  type="primary", use_container_width=True):
@@ -55,15 +60,20 @@ class AntarmukaTampilan:
         st.divider()
         # pb.associationRulesDev()
         if ar.MemeriksaUploadTransaksi():
-            if ar.memeriksaRules():
-                if ar.memeriksaListProduk():
-                    pb.pilihKategori(ar.getListProduk())
-                    pb.inputTanamanBaru()
-                    pb.buatPaketBundling()
+            if session_state.proses_association_rule_done:
+                if ar.memeriksaRules():
+                    if ar.memeriksaListProduk():
+                        pb.pilihKategori(ar.getListProduk())
+                        pb.inputTanamanBaru()
+                        pb.buatPaketBundling()
+                    else:
+                        st.error("List produk tidak ditemukan.")
                 else:
-                    st.error("List produk tanaman hias tidak ada")
+                    st.error("Tidak dapat membuat paket bundling karena tidak terdapat rekomendasi produk bundling. Masukkan file transaksi dengan rentang waktu yang lain")
             else:
-                st.error("Tidak dapat membuat paket bundling karena tidak terdapat rekomendasi produk bundling. Masukkan file transaksi dengan rentang waktu yang lain")
+                st.error("Proses association rule belum dilakukan")
+                if st.button('Proses association rule', type="primary", use_container_width=True):
+                    session_state.selected_page = "Proses Association Rules"
         else:
             st.error("Masukkan file transaksi terlebih dahulu")
             if st.button("Upload Data",  type="primary",use_container_width=True):
@@ -81,6 +91,7 @@ class AntarmukaTampilan:
             list_produk_new = session_state.list_produk_new
 
             df_bundling_now_list = df_bundling_now['Lineitem name'].tolist()
+
             # Gunakan metode 'applymap' untuk menerapkan fungsi lambda pada setiap sel di dalam kolom 'Produk Rules'
             df_association_unique = session_state.df_association_unique
             df_association_unique['Produk Rules'] = df_association_unique['Produk Rules'].apply(lambda x: x + df_bundling_now_list)
@@ -100,30 +111,53 @@ class AntarmukaTampilan:
             list_rules_produk = pd.DataFrame({'Lineitem name': nama_tanaman, 'Kode Rules': kode_rules})
 
             bundling_with_price = pd.merge(list_rules_produk, list_produk_new, on='Lineitem name', how='left')
-            # bundling_with_price = bundling_with_price.drop(columns=['Frekuensi'])
-
-            bundling_download =  bundling_with_price.copy()
             
-            # Menggabungkan berdasarkan 'Kode Rules' dan menghitung jumlah total 'Harga Beli' untuk setiap Kode Rules
-            total_harga_beli = bundling_download.groupby('Kode Rules')['Harga Beli'].sum()
+            # Menggabungkan berdasarkan 'Kode Rules' dan menghitung jumlah total 'Lineitem price' untuk setiap grup
+            total_harga_minimum_jual = bundling_with_price.groupby('Kode Rules')['Harga Minimum Jual'].sum()
 
-            # Menambahkan kolom baru 'Rekomendasi Harga Bundling' yang dihitung dengan mengalikan jumlah total 'Lineitem price' dengan 3
-            bundling_download['Rekomendasi Harga Bundling'] = bundling_download['Kode Rules'].map(
-                total_harga_beli) * 3
+            # Menambahkan kolom baru 'rekomendasi_harga_bundling' yang dihitung dengan menjumlahakan Harga Minimum Jual dengan value Kode Rules yang sama
+            bundling_with_price['Rekomendasi Harga Bundling'] = bundling_with_price['Kode Rules'].map(total_harga_minimum_jual)
+
+            total_harga_beli = bundling_with_price.groupby('Kode Rules')['Harga Beli'].sum()
+            # Membuat kolom 'keuntungan' berdasarkan selisih antara 'rekomendasi_harga_bundling' dan 'Harga Beli'
+            bundling_with_price['Keuntungan'] = bundling_with_price['Rekomendasi Harga Bundling'] - bundling_with_price['Kode Rules'].map(total_harga_beli)
             
-            # Membuat kolom 'keuntungan' berdasarkan selisih antara 'Rekomendasi Harga Bundling' dan 'Harga Beli'
-            bundling_download['Keuntungan'] = bundling_download['Rekomendasi Harga Bundling'] - bundling_download['Kode Rules'].map(total_harga_beli)
+            # Menggabungkan nilai Lineitem_name dengan Kode_Rules yang sama dan melakukan agregasi pada kolom lainnya
+            df_bundling_keuntungan = bundling_with_price.groupby('Kode Rules').agg({
+                'Lineitem name': ','.join,
+                'Rekomendasi Harga Bundling': 'first',
+                'Keuntungan': 'first'
+            }).reset_index()
+            
+            # Mengurutkan berdasarkan keuntungan terbesar
+            df_bundling_keuntungan = df_bundling_keuntungan.sort_values(by="Keuntungan", ascending=False)
+            df_bundling_keuntungan['Kode Rules'] = df_bundling_keuntungan.reset_index().index + 1
+            df_bundling_keuntungan['Lineitem name'] = df_bundling_keuntungan['Lineitem name'].str.split(',')
 
+            # Membuat dataframe baru dengan nilai Lineitem name yang telah terpisah kembali
+            df_bundling_keuntungan_sorted = pd.DataFrame({
+                'Lineitem name': [item for sublist in df_bundling_keuntungan['Lineitem name'] for item in sublist],
+                'Kode Rules': df_bundling_keuntungan['Kode Rules'].repeat(df_bundling_keuntungan['Lineitem name'].apply(len)),
+                'Rekomendasi Harga Bundling': df_bundling_keuntungan['Rekomendasi Harga Bundling'].repeat(df_bundling_keuntungan['Lineitem name'].apply(len)),
+                'Keuntungan': df_bundling_keuntungan['Keuntungan'].repeat(df_bundling_keuntungan['Lineitem name'].apply(len)),
+            })
+
+            df_bundling_keuntungan_merge = pd.merge(df_bundling_keuntungan_sorted, list_produk_new, on='Lineitem name', how='left')
+            new_column_order = ['Kode Rules', 'Lineitem name', 'Lineitem price', 'Harga Beli',  'Harga Minimum Jual', 'Rekomendasi Harga Bundling', 'Keuntungan']
+
+            df_bundling_keuntungan_merge = df_bundling_keuntungan_merge.reindex(columns=new_column_order)
             
             # Membuat dictionary berdasarkan 'Kode Rules' dengan masing-masing DataFrame
-            df_dict = dict(
-                tuple(bundling_with_price.groupby('Kode Rules')))
-
-            pb.menyimpanDataPaketBundling(bundling_download)
+            df_dict = dict(tuple(df_bundling_keuntungan_merge.groupby('Kode Rules')))
+            pb.menyimpanDataPaketBundling(df_bundling_keuntungan_merge)
             st.markdown("<h4>Rekomendasi Paket Bundling</h4>", unsafe_allow_html=True)
-            st.markdown("<p>Harga beli didapatkan dari harga jual yang terdapat pada kolom Lineitem price dibagi 4. harga beli merupakan harga modal perusahaan terhadap produk</p>", unsafe_allow_html=True)
-            st.markdown("<p>Rekomendasi harga paket bundling didapatkan dari total harga beli produk x 3</p>", unsafe_allow_html=True)
-            st.write("Terdapat ", len(df_dict), ' rekomendasi paket bundling')
+            st.markdown("<p>Diketahui bahwa harga jual yang terdapat pada attribute Lineitem price didapat dari Harga Beli di kali 4.</p>", unsafe_allow_html=True)
+            st.markdown("<p>Harga Beli adalah harga modal greenspaces.id terhadap produk, Harga Beli didapatkan dari harga jual yang terdapat pada Lineitem price dibagi 4.</p>", unsafe_allow_html=True)
+            st.markdown("<p>Harga Minimum Jual adalah harga minimum untuk menjual produk, Harga Minimum Jual didapatkan dari Harga Beli dikali 3.</p>", unsafe_allow_html=True)
+            st.markdown("<p>Rekomendasi Harga Paket Bundling didapatkan dari jumlah harga minimum jual pada produk yang ada pada rekomendasi paket bundling</p>", unsafe_allow_html=True)
+            st.markdown("<p>Keuntungan didapatkan dari selisih antara Jumlah Harga Beli produk yang ada pada paket bundaling dengan Rekomendasi Harga Paket Bundling</p>", unsafe_allow_html=True)
+            st.write("Diketahui juga terdapat ", len(df_dict), ' rekomendasi paket bundling')
+            
             pb.tampilPaketBundling(df_dict)
         else:
             st.divider()
